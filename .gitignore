@@ -1,0 +1,16 @@
+# Python
+backend/.venv/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+
+# Environment
+.env
+.env.local
+.env.*
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/extensions.json
