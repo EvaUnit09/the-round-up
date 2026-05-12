@@ -1,6 +1,39 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { demoName } from "./lib/demo-users";
+
+// --- API types ---
+
+interface ApiUser {
+  user_id: string;
+  opt_in: boolean | null;
+  last_visit: string | null;
+}
+
+interface ApiDigestUser {
+  user_id: string;
+  display_name: string;
+  tag_weights: Record<string, number>;
+}
+
+interface ApiArticle {
+  title: string;
+  blurb: string;
+  url: string;
+  content_pillar: string;
+  affinity_score: number;
+  why_relevant: string;
+}
+
+interface ApiDigest {
+  user: ApiDigestUser;
+  subject_line: string;
+  recommendations: ApiArticle[];
+  digest_date: string;
+}
+
+// --- UI types ---
 
 type TagIcon = "clock" | "bolt" | "bookmark" | "send";
 
@@ -17,10 +50,11 @@ interface Affinity {
 
 interface Article {
   category: string;
-  subcategory: string;
+  subcategory?: string;
   categoryColor: string;
   title: string;
   tag: string;
+  url?: string;
 }
 
 interface UserProfile {
@@ -32,100 +66,25 @@ interface UserProfile {
   articles: Article[];
 }
 
-interface Metric {
-  label: string;
-  value: string;
-  comparison: string;
-}
+// --- Constants ---
 
-const users: UserProfile[] = [
-  {
-    label: "User A",
-    name: "Russell — sport heavy",
-    tags: [
-      { icon: "clock", label: "Morning reader" },
-      { icon: "bolt", label: "Power user" },
-      { icon: "send", label: "Send at 07:30" },
-    ],
-    affinities: [
-      { section: "Sport", percent: 55, color: "bg-blue-500" },
-      { section: "News", percent: 18, color: "bg-zinc-400" },
-      { section: "Culture", percent: 8, color: "bg-orange-500" },
-      { section: "Technology", percent: 6, color: "bg-green-500" },
-    ],
-    subjectLine:
-      '"Bellingham, the Ashes, and a story you\'ll want to read about Arsenal"',
-    articles: [
-      {
-        category: "Sport",
-        subcategory: "Football",
-        categoryColor: "text-orange-400",
-        title: "Arsenal keep title hopes alive with dramatic late win",
-        tag: "Based on your Premier League interest",
-      },
-      {
-        category: "Sport",
-        subcategory: "Cricket",
-        categoryColor: "text-orange-400",
-        title: "England win Ashes opener in Brisbane",
-        tag: "You read 12 cricket articles last month",
-      },
-      {
-        category: "News",
-        subcategory: "UK Politics",
-        categoryColor: "text-zinc-400",
-        title: "PM faces fresh rebellion over housing bill",
-        tag: "Trending among similar readers",
-      },
-    ],
-  },
-  {
-    label: "User B",
-    name: "Rachael — entertainment",
-    tags: [
-      { icon: "clock", label: "Evening reader" },
-      { icon: "bookmark", label: "Casual user" },
-      { icon: "send", label: "Send at 19:15" },
-    ],
-    affinities: [
-      { section: "Culture", percent: 50, color: "bg-orange-500" },
-      { section: "News", percent: 15, color: "bg-zinc-400" },
-      { section: "Travel", percent: 12, color: "bg-purple-500" },
-      { section: "Technology", percent: 10, color: "bg-green-500" },
-    ],
-    subjectLine:
-      '"A must-see film, a surprise album drop, and a travel story for your list"',
-    articles: [
-      {
-        category: "Culture",
-        subcategory: "Film",
-        categoryColor: "text-pink-400",
-        title: "Review: Harbour is a haunting meditation on grief",
-        tag: "Based on your film & arts interest",
-      },
-      {
-        category: "Culture",
-        subcategory: "Music",
-        categoryColor: "text-pink-400",
-        title: "Dua Lipa announces surprise album and world tour",
-        tag: "You read 8 music articles this week",
-      },
-      {
-        category: "Travel",
-        subcategory: "Europe",
-        categoryColor: "text-purple-400",
-        title: "Why Portugal should be your next city break",
-        tag: "Matches your travel reading pattern",
-      },
-    ],
-  },
-];
+const PILLAR_COLORS: Record<string, { bar: string; text: string }> = {
+  Sport: { bar: "bg-blue-500", text: "text-blue-400" },
+  News: { bar: "bg-zinc-400", text: "text-zinc-400" },
+  Culture: { bar: "bg-orange-500", text: "text-orange-400" },
+  Technology: { bar: "bg-green-500", text: "text-green-400" },
+  Travel: { bar: "bg-purple-500", text: "text-purple-400" },
+  Business: { bar: "bg-yellow-500", text: "text-yellow-400" },
+  Science: { bar: "bg-cyan-500", text: "text-cyan-400" },
+  Health: { bar: "bg-rose-500", text: "text-rose-400" },
+};
 
-const metrics: Metric[] = [
-  { label: "Open rate", value: "62%", comparison: "↑ 24pp vs baseline" },
-  { label: "Clickthrough rate", value: "41%", comparison: "↑ 18pp vs baseline" },
-  { label: "Return visits / day", value: "2.3x", comparison: "↑ vs 0.8x baseline" },
-  { label: "Est. ad revenue lift", value: "+34%", comparison: "per active user" },
+const DEFAULT_PILLAR_COLORS = { bar: "bg-zinc-500", text: "text-zinc-400" };
+
+// Placeholder tags — send time and engagement level not yet available from DB
+const PLACEHOLDER_TAGS: Tag[] = [
+  { icon: "bolt", label: "Engaged user" },
+  { icon: "send", label: "Send time: TBD" },
 ];
 
 const tagStyles: Record<TagIcon, string> = {
@@ -134,6 +93,44 @@ const tagStyles: Record<TagIcon, string> = {
   bookmark: "text-amber-300 bg-amber-950/70 border-amber-800/40",
   send: "text-zinc-400 bg-zinc-800/60 border-zinc-700/40",
 };
+
+// --- Helpers ---
+
+function pillarColors(pillar: string) {
+  const key = pillar.charAt(0).toUpperCase() + pillar.slice(1).toLowerCase();
+  return PILLAR_COLORS[key] ?? DEFAULT_PILLAR_COLORS;
+}
+
+function mapDigestToProfile(digest: ApiDigest, label: string): UserProfile {
+  const { user, subject_line, recommendations } = digest;
+
+  const affinities: Affinity[] = Object.entries(user.tag_weights)
+    .sort(([, a], [, b]) => b - a)
+    .map(([pillar, weight]) => ({
+      section: pillar.charAt(0).toUpperCase() + pillar.slice(1).toLowerCase(),
+      percent: Math.round(weight * 100),
+      color: pillarColors(pillar).bar,
+    }));
+
+  const articles: Article[] = recommendations.map((rec) => ({
+    category: rec.content_pillar.charAt(0).toUpperCase() + rec.content_pillar.slice(1).toLowerCase(),
+    categoryColor: pillarColors(rec.content_pillar).text,
+    title: rec.title,
+    tag: rec.why_relevant,
+    url: rec.url,
+  }));
+
+  return {
+    label,
+    name: demoName(user.user_id),
+    tags: PLACEHOLDER_TAGS,
+    affinities,
+    subjectLine: subject_line,
+    articles,
+  };
+}
+
+// --- Icons ---
 
 function ClockIcon() {
   return (
@@ -193,6 +190,8 @@ function TagIconComponent({ icon }: { icon: TagIcon }) {
   return <SendIcon />;
 }
 
+// --- Sub-components ---
+
 function AffinityBar({ section, percent, color }: Affinity) {
   return (
     <div className="flex items-center gap-3">
@@ -210,11 +209,22 @@ function ArticleItem({ article }: { article: Article }) {
     <div className="py-3 border-b border-zinc-700/40 last:border-0">
       <div className="flex items-start justify-between gap-2 mb-1.5">
         <span className={`text-xs font-medium ${article.categoryColor}`}>
-          {article.category} · {article.subcategory}
+          {article.category}{article.subcategory ? ` · ${article.subcategory}` : ""}
         </span>
-        <button className="text-zinc-600 hover:text-zinc-300 shrink-0 transition-colors">
-          <ExternalLinkIcon />
-        </button>
+        {article.url ? (
+          <a
+            href={article.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-zinc-600 hover:text-zinc-300 shrink-0 transition-colors"
+          >
+            <ExternalLinkIcon />
+          </a>
+        ) : (
+          <button className="text-zinc-600 hover:text-zinc-300 shrink-0 transition-colors">
+            <ExternalLinkIcon />
+          </button>
+        )}
       </div>
       <p className="text-sm text-white font-medium leading-snug mb-2">{article.title}</p>
       <span className="inline-block text-xs px-2.5 py-1 rounded-full bg-teal-950/60 text-teal-300 border border-teal-800/30">
@@ -257,7 +267,7 @@ function UserCard({ user }: { user: UserProfile }) {
       </div>
 
       <div className="bg-zinc-950/60 rounded-lg p-3 border border-zinc-700/30">
-        <p className="text-xs text-zinc-500 mb-1.5">LLM subject line</p>
+        <p className="text-xs text-zinc-500 mb-1.5">Subject line</p>
         <p className="text-sm text-zinc-200 leading-snug">{user.subjectLine}</p>
       </div>
 
@@ -270,21 +280,66 @@ function UserCard({ user }: { user: UserProfile }) {
   );
 }
 
-function MetricCard({ label, value, comparison }: Metric) {
-  const isPerUser = comparison === "per active user";
+function UserCardSkeleton({ label }: { label: string }) {
   return (
-    <div className="flex flex-col gap-1">
-      <p className="text-sm text-zinc-500">{label}</p>
-      <p className="text-4xl font-bold text-white tracking-tight">{value}</p>
-      <p className={`text-xs ${isPerUser ? "text-zinc-500" : "text-green-400"}`}>
-        {comparison}
-      </p>
+    <div className="bg-zinc-900 rounded-xl p-4 flex flex-col gap-4 border border-zinc-800/60 animate-pulse">
+      <div>
+        <p className="text-xs text-zinc-500 mb-2">{label}</p>
+        <div className="h-9 bg-zinc-800 rounded-lg" />
+      </div>
+      <div className="flex gap-2">
+        <div className="h-6 w-24 bg-zinc-800 rounded-full" />
+        <div className="h-6 w-28 bg-zinc-800 rounded-full" />
+      </div>
+      <div className="flex flex-col gap-2.5">
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="h-4 bg-zinc-800 rounded-full" />
+        ))}
+      </div>
+      <div className="h-16 bg-zinc-800 rounded-lg" />
+      <div className="flex flex-col gap-3">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="h-16 bg-zinc-800 rounded-lg" />
+        ))}
+      </div>
     </div>
   );
 }
 
+// --- Page ---
+
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<"digest" | "impact">("digest");
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const usersRes = await fetch("/api/users");
+        if (!usersRes.ok) throw new Error(`Users fetch failed: ${usersRes.status}`);
+        const userList = (await usersRes.json()) as ApiUser[];
+
+        const first2 = userList.slice(0, 2);
+        const digests = await Promise.all(
+          first2.map((u) =>
+            fetch(`/api/digest/${encodeURIComponent(u.user_id)}?affinity_limit=4`).then((r) => {
+              if (!r.ok) throw new Error(`Digest fetch failed: ${r.status}`);
+              return r.json() as Promise<ApiDigest>;
+            })
+          )
+        );
+
+        setUsers(digests.map((d, i) => mapDigestToProfile(d, `User ${String.fromCharCode(65 + i)}`)));
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Failed to load");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    load();
+  }, []);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white font-sans">
@@ -296,48 +351,27 @@ export default function Home() {
           <span className="text-zinc-600">|</span>
           <span className="text-white text-sm font-medium">The Round Up</span>
         </div>
-        <nav className="flex items-center gap-1">
-          <button
-            onClick={() => setActiveTab("digest")}
-            className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
-              activeTab === "digest"
-                ? "bg-rose-700/80 text-white"
-                : "text-zinc-400 hover:text-white"
-            }`}
-          >
-            Digest preview
-          </button>
-          <button
-            onClick={() => setActiveTab("impact")}
-            className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
-              activeTab === "impact"
-                ? "bg-rose-700/80 text-white"
-                : "text-zinc-400 hover:text-white"
-            }`}
-          >
-            Impact dashboard
-          </button>
-        </nav>
+        <span className="px-4 py-1.5 rounded-full text-sm font-medium bg-rose-700/80 text-white">
+          Digest preview
+        </span>
       </header>
 
       <main className="p-6 flex flex-col gap-5 max-w-5xl mx-auto">
-        <div className="grid grid-cols-2 gap-4">
-          {users.map((user) => (
-            <UserCard key={user.label} user={user} />
-          ))}
-        </div>
-
-        <div className="bg-zinc-900 rounded-xl p-5 border border-zinc-800/60">
-          <p className="text-xs text-zinc-500 mb-5">
-            Simulated impact — personalised vs. non-personalised baseline
-          </p>
-          <div className="grid grid-cols-4 divide-x divide-zinc-800">
-            {metrics.map((metric) => (
-              <div key={metric.label} className="px-5 first:pl-0 last:pr-0">
-                <MetricCard {...metric} />
-              </div>
-            ))}
+        {error && (
+          <div className="px-4 py-3 rounded-lg bg-red-950 border border-red-800 text-red-300 text-sm">
+            {error}
           </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-4">
+          {loading ? (
+            <>
+              <UserCardSkeleton label="User A" />
+              <UserCardSkeleton label="User B" />
+            </>
+          ) : (
+            users.map((user) => <UserCard key={user.label} user={user} />)
+          )}
         </div>
       </main>
     </div>
