@@ -95,27 +95,6 @@ Snowflake  ──►  FastAPI (Python)  ──►  Next.js frontend
 
 ---
 
-## Running Locally
-
-### Backend
-
-```bash
-source backend/.venv/bin/activate
-cd backend
-uvicorn main:app --reload
-```
-
-Requires a `.env` file with `SF_WAREHOUSE`, `SF_DATABASE`, and `SF_SCHEMA` set, and BBC SSO authentication for Snowflake.
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-The frontend proxies `/api/*` to `http://localhost:8000` automatically.
 
 ---
 
